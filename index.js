@@ -1,5 +1,7 @@
 const express = require("express");
 const mysql = require("mysql2");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
 const bodyParser = require("body-parser");
 
 const app = express();
@@ -21,62 +23,70 @@ db.connect((err) => {
 });
 
 app.post("/register", (req, res) => {
-  const { username, password } = req.body;
+  const { email, password } = req.body;
 
-  if (!username || !password) {
-    return res
-      .status(400)
-      .json({ error: "Username and password are required" });
-  }
+  if (!email || !password)
+    return res.status(400).json({ error: "Email dan password harus diisi" });
 
-  db.query(
-    "SELECT * FROM users WHERE username = ?",
-    [username],
-    (error, results) => {
-      if (error) {
-        console.error("Error executing MySQL query:", error);
-        return res.status(500).json({ error: "Internal server error" });
-      }
-      if (results.length > 0) {
-        return res.status(400).json({ error: "Username already exists" });
-      }
-
-      db.query(
-        "INSERT INTO users (username, password) VALUES (?, ?)",
-        [username, password],
-        (error) => {
-          if (error) {
-            console.error("Error executing MySQL query:", error);
-            return res.status(500).json({ error: "Internal server error" });
-          }
-          return res
-            .status(201)
-            .json({ message: "User registered successfully" });
-        }
-      );
+  db.query("SELECT * FROM users WHERE email = ?", [email], (error, results) => {
+    if (error) {
+      console.error("Error executing MySQL query:", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
-  );
+    if (results.length > 0) {
+      return res.status(400).json({ error: "Email sudah tersedia!" });
+    }
+    const hashedPassword = bcrypt.hashSync(password, 10);
+    db.query(
+      "INSERT INTO users (email, password) VALUES (?, ?)",
+      [email, hashedPassword],
+      (error) => {
+        if (error) {
+          console.error("Error executing MySQL query:", error);
+          return res.status(500).json({ error: "Internal server error" });
+        }
+        return res
+          .status(201)
+          .json({ message: "User registered successfully" });
+      }
+    );
+  });
 });
 
 app.post("/login", (req, res) => {
-  const { username, password } = req.body;
-  db.query(
-    "SELECT * FROM users WHERE username = ? AND password = ?",
-    [username, password],
-    (error, results) => {
-      if (error) {
-        console.error("Error executing MySQL query:", error);
-        return res.status(500).json({ error: "Internal server error" });
-      }
-      if (results.length === 0) {
-        return res.status(401).json({ error: "Invalid credentials" });
-      }
-      return res.status(200).json({ message: "Login successful" });
+  const { email, password } = req.body;
+  db.query("SELECT * FROM users WHERE email = ?", [email], (error, results) => {
+    if (error) {
+      console.error("Error executing MySQL query:", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
-  );
+    if (results.length === 0) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    const user = results[0];
+    if (!bcrypt.compareSync(password, user.password)) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    const token = jwt.sign({ id: user.id, email: user.email }, secretKey);
+    return res.status(200).json({ message: "Sukses", token });
+  });
 });
 
-app.get("/products", (req, res) => {
+const verifyToken = (req, res, next) => {
+  const token = req.headers["authorization"];
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  jwt.verify(token, secretKey, (err, decoded) => {
+    if (err) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+    req.userId = decoded.id;
+    next();
+  });
+};
+
+app.get("/products", verifyToken, (req, res) => {
   db.query("SELECT * FROM products", (error, results) => {
     if (error) {
       console.error("Error executing MySQL query:", error);
@@ -86,7 +96,7 @@ app.get("/products", (req, res) => {
   });
 });
 
-app.get("/products/:id", (req, res) => {
+app.get("/products/:id", verifyToken, (req, res) => {
   const productId = req.params.id;
   db.query(
     "SELECT * FROM products WHERE id = ?",
