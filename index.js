@@ -25,9 +25,9 @@ db.connect((err) => {
 const secretKey = "46958fe7-54a9-44a1-bc38-103aa35baeb1";
 
 app.post("/register", (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, username } = req.body;
 
-  if (!email || !password)
+  if (!email || !password || !username)
     return res.status(400).json({ error: "Email dan password harus diisi" });
 
   db.query("SELECT * FROM users WHERE email = ?", [email], (error, results) => {
@@ -41,8 +41,8 @@ app.post("/register", (req, res) => {
     const hashedPassword = bcrypt.hashSync(password, 10);
 
     db.query(
-      "INSERT INTO users (email, password) VALUES (?, ?)",
-      [email, hashedPassword],
+      "INSERT INTO users (email, password, name) VALUES (?, ?, ?)",
+      [email, hashedPassword, username],
       (error) => {
         if (error) {
           console.error("Error executing MySQL query:", error);
